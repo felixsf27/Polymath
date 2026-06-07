@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Polymath</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#7c6fff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Polymath">
+<link rel="apple-touch-icon" href="icon.svg">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1043,9 +1049,23 @@ function showEntryDetail(id) {
       <div style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.08); padding-top:14px;">
         <div style="font-size:12px; color:var(--gold); font-weight:600; margin-bottom:8px;">Wiederholung (${formatDate(entry.reviewDate)})</div>
         <div class="card-sm">
-          <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">${REVIEW_QUESTIONS[entry.videoId] || GENERIC_REVIEW}</div>
+          <div style="font-size:12px; color:var(--muted); margin-bottom:6px;">${esc(entry.customReviewQuestion || REVIEW_QUESTIONS[entry.videoId] || GENERIC_REVIEW)}</div>
           <div style="font-size:15px; line-height:1.5;">${esc(entry.reviewAnswer)}</div>
         </div>
+      </div>
+    ` : !REVIEW_QUESTIONS[entry.videoId] ? `
+      <div style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.08); padding-top:14px;" id="crq-section-${entry.id}">
+        <div style="font-size:12px; color:var(--gold); font-weight:600; margin-bottom:6px;">Wiederholungsfrage</div>
+        ${entry.customReviewQuestion ? `
+          <div class="card-sm" style="margin-bottom:8px;">
+            <div style="font-size:14px; line-height:1.5;">${esc(entry.customReviewQuestion)}</div>
+          </div>
+          <button onclick="editCustomReviewQ('${entry.id}')" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:0;">Bearbeiten</button>
+        ` : `
+          <p style="font-size:13px; color:var(--muted); margin-bottom:10px;">Frag Claude nach einer Frage für dieses Video, dann hier einfügen.</p>
+          <textarea id="crq-input-${entry.id}" placeholder="Von Claude vorbereitete Frage einfügen..." style="margin-bottom:8px;"></textarea>
+          <button class="btn btn-secondary btn-sm" onclick="saveCustomReviewQ('${entry.id}')">Frage speichern</button>
+        `}
       </div>
     ` : ''}
     <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;">
@@ -1074,6 +1094,29 @@ function deleteEntry(id, btn) {
   showToast('Gelöscht.');
 }
 
+function saveCustomReviewQ(id) {
+  const input = document.getElementById('crq-input-' + id);
+  if (!input) return;
+  const q = input.value.trim();
+  if (!q) { showToast('Frage ist leer.'); return; }
+  const idx = entries.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  entries[idx].customReviewQuestion = q;
+  saveEntries();
+  document.querySelectorAll('.overlay').forEach(o => o.remove());
+  showEntryDetail(id);
+  showToast('Wiederholungsfrage gespeichert.');
+}
+
+function editCustomReviewQ(id) {
+  const idx = entries.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  entries[idx].customReviewQuestion = null;
+  saveEntries();
+  document.querySelectorAll('.overlay').forEach(o => o.remove());
+  showEntryDetail(id);
+}
+
 function isReviewDue(entry) {
   if (entry.reviewAnswer) return false;
   const entryDate = new Date(entry.date + 'T12:00:00');
@@ -1087,7 +1130,7 @@ function showReviewOverlay(id) {
   const entry = entries.find(e => e.id === id);
   if (!entry) return;
   const t = TOPICS[entry.topic];
-  const reviewQ = REVIEW_QUESTIONS[entry.videoId] || GENERIC_REVIEW;
+  const reviewQ = entry.customReviewQuestion || REVIEW_QUESTIONS[entry.videoId] || GENERIC_REVIEW;
 
   const overlay = document.createElement('div');
   overlay.className = 'overlay';
@@ -1235,6 +1278,10 @@ async function syncInit() {
 
   updateSyncUI();
   renderHome();
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js');
 }
 
 syncInit();
