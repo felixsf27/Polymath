@@ -1,4 +1,4 @@
-const CACHE = 'polymath-v2';
+const CACHE = 'polymath-v3';
 const ASSETS = ['./polymath.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
