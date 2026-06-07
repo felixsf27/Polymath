@@ -330,6 +330,8 @@ h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
     </div>
   </div>
 
+  <div id="sync-status" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; min-height:20px;"></div>
+
   <div class="stats-row">
     <div class="stat-box">
       <div class="num" id="stat-total">0</div>
@@ -397,6 +399,7 @@ h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 const TOPICS = {
   history: {
@@ -984,7 +987,106 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-renderHome();
+// --- Supabase Sync ---
+const SUPABASE_URL  = 'https://odterkucrlydpkusurdx.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9kdGVya3Vjcmx5ZHBrdXN1cmR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzkwNjYsImV4cCI6MjA5NjMxNTA2Nn0.eDRLy505SM2FMp8baYPebzLxeyIFYd17XwmxdioTHWs';
+const SYNC_KEY = 'polymath_entries';
+
+let _sb = null, _user = null, _pulling = false, _syncTimer = null;
+
+function sb() {
+  if (!_sb) _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  return _sb;
+}
+
+async function pushToCloud() {
+  if (!_user) return;
+  const val = JSON.parse(localStorage.getItem(SYNC_KEY) || '[]');
+  await sb().from('user_data').upsert(
+    [{ user_id: _user.id, key: SYNC_KEY, value: val }],
+    { onConflict: 'user_id,key' }
+  );
+}
+
+async function pullFromCloud() {
+  if (!_user) return;
+  const { data } = await sb().from('user_data')
+    .select('value').eq('user_id', _user.id).eq('key', SYNC_KEY).single();
+  if (data?.value) {
+    _pulling = true;
+    localStorage.setItem(SYNC_KEY, JSON.stringify(data.value));
+    _pulling = false;
+  }
+}
+
+async function signInWithGitHub() {
+  await sb().auth.signInWithOAuth({
+    provider: 'github',
+    options: { redirectTo: window.location.origin + window.location.pathname }
+  });
+}
+
+async function signOutUser() {
+  await sb().auth.signOut();
+  _user = null;
+  updateSyncUI();
+}
+
+function updateSyncUI() {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  if (_user) {
+    el.innerHTML = `
+      <span style="color:var(--arg);font-size:12px;">Sync aktiv — ${esc(_user.user_metadata?.user_name || 'GitHub')}</span>
+      <button onclick="signOutUser()" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:0;">Abmelden</button>
+    `;
+  } else {
+    el.innerHTML = `
+      <span style="color:var(--muted);font-size:12px;">Nur lokal gespeichert</span>
+      <button onclick="signInWithGitHub()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;">Mit GitHub anmelden</button>
+    `;
+  }
+}
+
+async function syncInit() {
+  const { data: { session } } = await sb().auth.getSession();
+  if (session?.user) {
+    _user = session.user;
+    await pullFromCloud();
+    entries = JSON.parse(localStorage.getItem(SYNC_KEY) || '[]');
+  }
+
+  sb().auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user) {
+      _user = session.user;
+      await pullFromCloud();
+      entries = JSON.parse(localStorage.getItem(SYNC_KEY) || '[]');
+      renderHome();
+      updateSyncUI();
+    } else if (event === 'SIGNED_OUT') {
+      _user = null;
+      updateSyncUI();
+    }
+  });
+
+  const _orig = Storage.prototype.setItem;
+  Storage.prototype.setItem = function(key, value) {
+    _orig.call(this, key, value);
+    if (!_pulling && this === localStorage && _user && key === SYNC_KEY) {
+      clearTimeout(_syncTimer);
+      _syncTimer = setTimeout(pushToCloud, 2000);
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && _user) pushToCloud();
+  });
+
+  updateSyncUI();
+  renderHome();
+}
+
+syncInit();
 </script>
 </body>
 </html>
